@@ -11,7 +11,9 @@ if (!defined('ABSPATH')) { exit; }
 
 final class MKA_Workshop_Dates_OptionC {
     const META_DATES = '_workshop_dates';
-    const META_NEXT  = '_workshop_next_datetime';
+    const META_NEXT_DATE       = '_workshop_next_date';
+    const META_NEXT_START_TIME = '_workshop_next_start_time';
+    const META_NEXT_END_TIME   = '_workshop_next_end_time';
 
     public static function init(): void {
         add_action('add_meta_boxes', [__CLASS__, 'add_metabox']);
@@ -25,9 +27,22 @@ final class MKA_Workshop_Dates_OptionC {
         return is_array($types) ? array_values($types) : $defaults;
     }
 
-    private static function acf_field_name(): string {
-        $name = apply_filters('mka_wd_acf_field_name', 'workshop_next_datetime');
-        return is_string($name) ? $name : 'workshop_next_datetime';
+    private static function acf_field_names(): array {
+        $defaults = [
+            'date'  => 'workshop_next_date',
+            'start' => 'workshop_next_start_time',
+            'end'   => 'workshop_next_end_time',
+        ];
+        $names = apply_filters('mka_wd_acf_field_names', $defaults);
+        if (!is_array($names)) {
+            return $defaults;
+        }
+
+        return [
+            'date'  => isset($names['date']) && is_string($names['date']) ? $names['date'] : $defaults['date'],
+            'start' => isset($names['start']) && is_string($names['start']) ? $names['start'] : $defaults['start'],
+            'end'   => isset($names['end']) && is_string($names['end']) ? $names['end'] : $defaults['end'],
+        ];
     }
 
     public static function add_metabox(): void {
@@ -129,7 +144,7 @@ final class MKA_Workshop_Dates_OptionC {
         echo '</div>';
     }
 
-    private static function compute_next_iso(array $rows): ?string {
+    private static function compute_next_event(array $rows): ?array {
         $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('Europe/Warsaw');
         $now = new DateTimeImmutable('now', $tz);
         $candidates = [];
@@ -147,14 +162,27 @@ final class MKA_Workshop_Dates_OptionC {
                 continue;
             }
             if ($dt >= $now) {
-                $candidates[] = $dt;
+                $candidates[] = [
+                    'datetime' => $dt,
+                    'date'     => $date,
+                    'start'    => $start,
+                    'end'      => (string)($row['end'] ?? ''),
+                ];
             }
         }
 
         if (!$candidates) { return null; }
 
-        usort($candidates, fn($a, $b) => $a <=> $b);
-        return $candidates[0]->format(DateTimeInterface::ATOM);
+        usort($candidates, fn($a, $b) => $a['datetime'] <=> $b['datetime']);
+        return $candidates[0];
+    }
+
+    private static function update_acf_or_meta(int $post_id, string $field_name, string $value): void {
+        if (function_exists('update_field')) {
+            @update_field($field_name, $value, $post_id);
+            return;
+        }
+        update_post_meta($post_id, $field_name, $value);
     }
 
     public static function save_post(int $post_id, WP_Post $post): void {
@@ -191,18 +219,33 @@ final class MKA_Workshop_Dates_OptionC {
 
         update_post_meta($post_id, self::META_DATES, wp_json_encode($clean, JSON_UNESCAPED_UNICODE));
 
-        $next = self::compute_next_iso($clean);
+        $next = self::compute_next_event($clean);
         if ($next) {
-            update_post_meta($post_id, self::META_NEXT, $next);
+            $next_date = (string)($next['date'] ?? '');
+            $next_start = (string)($next['start'] ?? '');
+            $next_end = (string)($next['end'] ?? '');
 
-            $acf_name = self::acf_field_name();
-            if (function_exists('update_field')) {
-                @update_field($acf_name, $next, $post_id);
-            } else {
-                update_post_meta($post_id, $acf_name, $next);
-            }
+            update_post_meta($post_id, self::META_NEXT_DATE, $next_date);
+            update_post_meta($post_id, self::META_NEXT_START_TIME, $next_start);
+            update_post_meta($post_id, self::META_NEXT_END_TIME, $next_end);
+
+            $acf_names = self::acf_field_names();
+            self::update_acf_or_meta($post_id, $acf_names['date'], $next_date);
+            self::update_acf_or_meta($post_id, $acf_names['start'], $next_start);
+            self::update_acf_or_meta($post_id, $acf_names['end'], $next_end);
+
+            // Wyczyść stare pole, żeby uniknąć korzystania z nieaktualnych danych.
+            delete_post_meta($post_id, '_workshop_next_datetime');
+            delete_post_meta($post_id, 'workshop_next_datetime');
         } else {
-            delete_post_meta($post_id, self::META_NEXT);
+            update_post_meta($post_id, self::META_NEXT_DATE, '');
+            update_post_meta($post_id, self::META_NEXT_START_TIME, '');
+            update_post_meta($post_id, self::META_NEXT_END_TIME, '');
+
+            $acf_names = self::acf_field_names();
+            self::update_acf_or_meta($post_id, $acf_names['date'], '');
+            self::update_acf_or_meta($post_id, $acf_names['start'], '');
+            self::update_acf_or_meta($post_id, $acf_names['end'], '');
         }
     }
 }
