@@ -511,14 +511,31 @@ final class MKA_Workshop_Dates_OptionC {
             'Reply-To: ' . $name . ' <' . $email . '>',
         ];
 
-        $recipients = [
-            $email,
+        // Wysyłka przez standardowy mechanizm WordPress (wp_mail),
+        // aby działała z konfiguracją SMTP ustawioną w WP (np. przez plugin SMTP).
+        $organizer_recipients = [
             'warsztaty@mkalodz.pl',
             'p.wilkocki@mkalodz.pl',
         ];
 
-        $sent = wp_mail($recipients, $subject, $message, $headers);
-        self::redirect_after_reservation($post_id, $sent ? 'success' : 'error');
+        $organizer_sent = wp_mail($organizer_recipients, $subject, $message, $headers);
+
+        $confirmation_subject = sprintf('Potwierdzenie zapisu: %s (%s)', $workshop_title, $formatted_date);
+        $confirmation_message_lines = [
+            'Dziękujemy za zapis na warsztaty.',
+            '',
+            'Warsztaty: ' . $workshop_title,
+            'Data: ' . $formatted_date,
+            'Imię: ' . $name,
+            'Telefon: ' . $phone,
+            '',
+            'To jest automatyczne potwierdzenie zgłoszenia.',
+        ];
+        $confirmation_message = implode("\n", $confirmation_message_lines);
+
+        $user_sent = wp_mail($email, $confirmation_subject, $confirmation_message, $headers);
+
+        self::redirect_after_reservation($post_id, ($organizer_sent || $user_sent) ? 'success' : 'error');
     }
 
     public static function handle_next_button_submit(): void {
