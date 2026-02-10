@@ -15,6 +15,7 @@ final class MKA_Workshop_Dates_OptionC {
     const META_NEXT_START_TIME = '_workshop_next_start_time';
     const META_NEXT_END_TIME   = '_workshop_next_end_time';
     const META_ROTATION_INDEX  = '_workshop_next_rotation_index';
+    const OPTION_SETTINGS = 'mka_wd_settings';
 
 
     public static function init(): void {
@@ -29,6 +30,33 @@ final class MKA_Workshop_Dates_OptionC {
         add_shortcode('rezerwa_pw', [__CLASS__, 'render_reservation_shortcode']);
         add_action('admin_post_mka_wd_workshop_reservation', [__CLASS__, 'handle_reservation_submit']);
         add_action('admin_post_nopriv_mka_wd_workshop_reservation', [__CLASS__, 'handle_reservation_submit']);
+        add_action('admin_menu', [__CLASS__, 'register_settings_page']);
+        add_action('admin_init', [__CLASS__, 'register_settings']);
+    }
+
+    private static function default_settings(): array {
+        return [
+            'organizer_recipients' => "warsztaty@mkalodz.pl\np.wilkocki@mkalodz.pl",
+            'organizer_subject' => 'Nowy zapis na warsztaty: {workshop_title} ({workshop_date})',
+            'organizer_message' => "Nowe zgłoszenie na warsztaty:\n\nWarsztaty: {workshop_title}\nData: {workshop_date}\nImię: {name}\nTelefon: {phone}\nE-mail: {email}\nZgoda RODO: tak",
+            'client_subject' => 'Potwierdzenie zapisu: {workshop_title} ({workshop_date})',
+            'client_message' => "Dziękujemy za zapis na warsztaty.\n\nWarsztaty: {workshop_title}\nData: {workshop_date}\nImię: {name}\nTelefon: {phone}\n\nTo jest automatyczne potwierdzenie zgłoszenia.",
+            'button_bg_color' => '#1d4ed8',
+            'button_text_color' => '#ffffff',
+            'button_border_radius' => '6',
+            'button_padding_y' => '10',
+            'button_padding_x' => '16',
+        ];
+    }
+
+    private static function get_settings(): array {
+        $defaults = self::default_settings();
+        $raw = get_option(self::OPTION_SETTINGS, []);
+        if (!is_array($raw)) {
+            return $defaults;
+        }
+
+        return array_merge($defaults, $raw);
     }
 
     private static function post_types(): array {
@@ -94,6 +122,153 @@ final class MKA_Workshop_Dates_OptionC {
             '1.0.0',
             true
         );
+    }
+
+    public static function register_settings_page(): void {
+        add_options_page(
+            'MKA Workshop Dates',
+            'MKA Workshop Dates',
+            'manage_options',
+            'mka-workshop-dates-settings',
+            [__CLASS__, 'render_settings_page']
+        );
+    }
+
+    public static function register_settings(): void {
+        register_setting(
+            'mka_wd_settings_group',
+            self::OPTION_SETTINGS,
+            [
+                'sanitize_callback' => [__CLASS__, 'sanitize_settings'],
+                'default' => self::default_settings(),
+            ]
+        );
+
+        add_settings_section(
+            'mka_wd_mail_section',
+            'Treści e-mail',
+            '__return_empty_string',
+            'mka-workshop-dates-settings'
+        );
+
+        add_settings_field(
+            'organizer_recipients',
+            'Adresy organizatorów (1 e-mail na linię)',
+            [__CLASS__, 'render_textarea_field'],
+            'mka-workshop-dates-settings',
+            'mka_wd_mail_section',
+            ['key' => 'organizer_recipients', 'rows' => 4]
+        );
+
+        add_settings_field(
+            'organizer_subject',
+            'Temat e-maila do organizatorów',
+            [__CLASS__, 'render_text_field'],
+            'mka-workshop-dates-settings',
+            'mka_wd_mail_section',
+            ['key' => 'organizer_subject']
+        );
+
+        add_settings_field(
+            'organizer_message',
+            'Treść e-maila do organizatorów',
+            [__CLASS__, 'render_textarea_field'],
+            'mka-workshop-dates-settings',
+            'mka_wd_mail_section',
+            ['key' => 'organizer_message', 'rows' => 8]
+        );
+
+        add_settings_field(
+            'client_subject',
+            'Temat e-maila dla klienta',
+            [__CLASS__, 'render_text_field'],
+            'mka-workshop-dates-settings',
+            'mka_wd_mail_section',
+            ['key' => 'client_subject']
+        );
+
+        add_settings_field(
+            'client_message',
+            'Treść e-maila dla klienta',
+            [__CLASS__, 'render_textarea_field'],
+            'mka-workshop-dates-settings',
+            'mka_wd_mail_section',
+            ['key' => 'client_message', 'rows' => 8]
+        );
+
+        add_settings_section(
+            'mka_wd_buttons_section',
+            'Wygląd buttonów',
+            '__return_empty_string',
+            'mka-workshop-dates-settings'
+        );
+
+        add_settings_field('button_bg_color', 'Kolor tła', [__CLASS__, 'render_text_field'], 'mka-workshop-dates-settings', 'mka_wd_buttons_section', ['key' => 'button_bg_color']);
+        add_settings_field('button_text_color', 'Kolor tekstu', [__CLASS__, 'render_text_field'], 'mka-workshop-dates-settings', 'mka_wd_buttons_section', ['key' => 'button_text_color']);
+        add_settings_field('button_border_radius', 'Zaokrąglenie rogów (px)', [__CLASS__, 'render_number_field'], 'mka-workshop-dates-settings', 'mka_wd_buttons_section', ['key' => 'button_border_radius']);
+        add_settings_field('button_padding_y', 'Padding pionowy (px)', [__CLASS__, 'render_number_field'], 'mka-workshop-dates-settings', 'mka_wd_buttons_section', ['key' => 'button_padding_y']);
+        add_settings_field('button_padding_x', 'Padding poziomy (px)', [__CLASS__, 'render_number_field'], 'mka-workshop-dates-settings', 'mka_wd_buttons_section', ['key' => 'button_padding_x']);
+    }
+
+    public static function render_settings_page(): void {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        echo '<div class="wrap">';
+        echo '<h1>MKA Workshop Dates - ustawienia</h1>';
+        echo '<p>Dostępne placeholdery: <code>{workshop_title}</code>, <code>{workshop_date}</code>, <code>{name}</code>, <code>{phone}</code>, <code>{email}</code>.</p>';
+        echo '<form method="post" action="options.php">';
+        settings_fields('mka_wd_settings_group');
+        do_settings_sections('mka-workshop-dates-settings');
+        submit_button('Zapisz ustawienia');
+        echo '</form>';
+        echo '</div>';
+    }
+
+    public static function sanitize_settings($input): array {
+        $defaults = self::default_settings();
+        $input = is_array($input) ? $input : [];
+
+        $settings = [];
+        $settings['organizer_recipients'] = sanitize_textarea_field((string)($input['organizer_recipients'] ?? $defaults['organizer_recipients']));
+        $settings['organizer_subject'] = sanitize_text_field((string)($input['organizer_subject'] ?? $defaults['organizer_subject']));
+        $settings['organizer_message'] = sanitize_textarea_field((string)($input['organizer_message'] ?? $defaults['organizer_message']));
+        $settings['client_subject'] = sanitize_text_field((string)($input['client_subject'] ?? $defaults['client_subject']));
+        $settings['client_message'] = sanitize_textarea_field((string)($input['client_message'] ?? $defaults['client_message']));
+
+        $settings['button_bg_color'] = sanitize_hex_color((string)($input['button_bg_color'] ?? $defaults['button_bg_color'])) ?: $defaults['button_bg_color'];
+        $settings['button_text_color'] = sanitize_hex_color((string)($input['button_text_color'] ?? $defaults['button_text_color'])) ?: $defaults['button_text_color'];
+        $settings['button_border_radius'] = (string)max(0, absint($input['button_border_radius'] ?? $defaults['button_border_radius']));
+        $settings['button_padding_y'] = (string)max(0, absint($input['button_padding_y'] ?? $defaults['button_padding_y']));
+        $settings['button_padding_x'] = (string)max(0, absint($input['button_padding_x'] ?? $defaults['button_padding_x']));
+
+        return $settings;
+    }
+
+    public static function render_text_field(array $args): void {
+        $settings = self::get_settings();
+        $key = isset($args['key']) ? (string)$args['key'] : '';
+        $value = isset($settings[$key]) ? (string)$settings[$key] : '';
+
+        echo '<input type="text" class="regular-text" name="' . esc_attr(self::OPTION_SETTINGS) . '[' . esc_attr($key) . ']" value="' . esc_attr($value) . '" />';
+    }
+
+    public static function render_number_field(array $args): void {
+        $settings = self::get_settings();
+        $key = isset($args['key']) ? (string)$args['key'] : '';
+        $value = isset($settings[$key]) ? (string)$settings[$key] : '0';
+
+        echo '<input type="number" min="0" class="small-text" name="' . esc_attr(self::OPTION_SETTINGS) . '[' . esc_attr($key) . ']" value="' . esc_attr($value) . '" />';
+    }
+
+    public static function render_textarea_field(array $args): void {
+        $settings = self::get_settings();
+        $key = isset($args['key']) ? (string)$args['key'] : '';
+        $rows = isset($args['rows']) ? max(2, absint($args['rows'])) : 5;
+        $value = isset($settings[$key]) ? (string)$settings[$key] : '';
+
+        echo '<textarea class="large-text" rows="' . esc_attr((string)$rows) . '" name="' . esc_attr(self::OPTION_SETTINGS) . '[' . esc_attr($key) . ']">' . esc_textarea($value) . '</textarea>';
     }
 
     private static function get_dates(int $post_id): array {
@@ -259,6 +434,48 @@ final class MKA_Workshop_Dates_OptionC {
         return '00:00';
     }
 
+    private static function get_button_style_attr(): string {
+        $settings = self::get_settings();
+
+        $styles = [
+            'background-color:' . ($settings['button_bg_color'] ?? '#1d4ed8'),
+            'color:' . ($settings['button_text_color'] ?? '#ffffff'),
+            'border-radius:' . absint($settings['button_border_radius'] ?? 6) . 'px',
+            'padding:' . absint($settings['button_padding_y'] ?? 10) . 'px ' . absint($settings['button_padding_x'] ?? 16) . 'px',
+            'border:none',
+            'cursor:pointer',
+        ];
+
+        return implode(';', $styles);
+    }
+
+    private static function apply_template_placeholders(string $template, array $replacements): string {
+        $search = [];
+        $replace = [];
+
+        foreach ($replacements as $key => $value) {
+            $search[] = '{' . $key . '}';
+            $replace[] = (string)$value;
+        }
+
+        return str_replace($search, $replace, $template);
+    }
+
+    private static function parse_recipients(string $raw): array {
+        $lines = preg_split('/\r\n|\r|\n/', $raw) ?: [];
+        $emails = [];
+
+        foreach ($lines as $line) {
+            $email = sanitize_email(trim((string)$line));
+            if ($email === '' || !is_email($email)) {
+                continue;
+            }
+            $emails[] = $email;
+        }
+
+        return array_values(array_unique($emails));
+    }
+
     private static function apply_next_event_to_post(int $post_id, array $event, ?int $rotation_index = null): void {
         $next_date = (string)($event['date'] ?? '');
         $next_start = (string)($event['start'] ?? '');
@@ -346,13 +563,14 @@ final class MKA_Workshop_Dates_OptionC {
         $button_label = esc_html((string)$atts['label']);
         $action_url = admin_url('admin-post.php');
         $nonce = wp_create_nonce('mka_wd_advance_next_date_' . $post_id);
+        $button_style = self::get_button_style_attr();
 
         $output  = '<div class="mka-next-button-wrap" id="' . esc_attr($uid) . '">';
         $output .= '  <form method="post" action="' . esc_url($action_url) . '">';
         $output .= '      <input type="hidden" name="action" value="mka_wd_advance_next_date_submit" />';
         $output .= '      <input type="hidden" name="post_id" value="' . esc_attr((string)$post_id) . '" />';
         $output .= '      <input type="hidden" name="nonce" value="' . esc_attr($nonce) . '" />';
-        $output .= '      <button type="submit" class="mka-next-button">' . $button_label . '</button>';
+        $output .= '      <button type="submit" class="mka-next-button" style="' . esc_attr($button_style) . '">' . $button_label . '</button>';
         $output .= '  </form>';
         $output .= '</div>';
 
@@ -409,6 +627,7 @@ final class MKA_Workshop_Dates_OptionC {
 
         $uid = wp_unique_id('mka-rezerwa-');
         $nonce = wp_create_nonce('mka_wd_workshop_reservation_' . $post_id);
+        $button_style = self::get_button_style_attr();
 
         $output = '<div class="mka-reservation-wrap" id="' . esc_attr($uid) . '">';
         if ($status === 'success') {
@@ -420,7 +639,7 @@ final class MKA_Workshop_Dates_OptionC {
         }
 
         $output .= '<details class="mka-reservation-details">';
-        $output .= '  <summary class="mka-reservation-button">' . esc_html((string)$atts['label']) . '</summary>';
+        $output .= '  <summary class="mka-reservation-button" style="' . esc_attr($button_style) . '">' . esc_html((string)$atts['label']) . '</summary>';
         $output .= '  <div class="mka-reservation-form-wrap">';
         $output .= '      <h3>' . esc_html((string)$atts['title']) . '</h3>';
         $output .= '      <form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
@@ -435,7 +654,7 @@ final class MKA_Workshop_Dates_OptionC {
         $output .= '          <p><label>Telefon<br /><input type="tel" name="phone" required /></label></p>';
         $output .= '          <p><label>Mail<br /><input type="email" name="email" required /></label></p>';
         $output .= '          <p><label><input type="checkbox" name="rodo" value="1" required /> Wyrażam zgodę na przetwarzanie danych osobowych (RODO).</label></p>';
-        $output .= '          <p><button type="submit" class="mka-reservation-submit">' . esc_html((string)$atts['submit_label']) . '</button></p>';
+        $output .= '          <p><button type="submit" class="mka-reservation-submit" style="' . esc_attr($button_style) . '">' . esc_html((string)$atts['submit_label']) . '</button></p>';
         $output .= '      </form>';
         $output .= '  </div>';
         $output .= '</details>';
@@ -493,45 +712,32 @@ final class MKA_Workshop_Dates_OptionC {
         }
 
         $formatted_date = self::format_date_for_display($workshop_date);
-        $subject = sprintf('Nowy zapis na warsztaty: %s (%s)', $workshop_title, $formatted_date);
-        $message_lines = [
-            'Nowe zgłoszenie na warsztaty:',
-            '',
-            'Warsztaty: ' . $workshop_title,
-            'Data: ' . $formatted_date,
-            'Imię: ' . $name,
-            'Telefon: ' . $phone,
-            'E-mail: ' . $email,
-            'Zgoda RODO: tak',
+        $settings = self::get_settings();
+        $template_vars = [
+            'workshop_title' => $workshop_title,
+            'workshop_date' => $formatted_date,
+            'name' => $name,
+            'phone' => $phone,
+            'email' => $email,
         ];
-        $message = implode("\n", $message_lines);
+
+        $subject = self::apply_template_placeholders((string)$settings['organizer_subject'], $template_vars);
+        $message = self::apply_template_placeholders((string)$settings['organizer_message'], $template_vars);
 
         $headers = [
             'Content-Type: text/plain; charset=UTF-8',
             'Reply-To: ' . $name . ' <' . $email . '>',
         ];
 
-        // Wysyłka przez standardowy mechanizm WordPress (wp_mail),
-        // aby działała z konfiguracją SMTP ustawioną w WP (np. przez plugin SMTP).
-        $organizer_recipients = [
-            'warsztaty@mkalodz.pl',
-            'p.wilkocki@mkalodz.pl',
-        ];
+        $organizer_recipients = self::parse_recipients((string)$settings['organizer_recipients']);
+        if (!$organizer_recipients) {
+            $organizer_recipients = self::parse_recipients((string)self::default_settings()['organizer_recipients']);
+        }
 
         $organizer_sent = wp_mail($organizer_recipients, $subject, $message, $headers);
 
-        $confirmation_subject = sprintf('Potwierdzenie zapisu: %s (%s)', $workshop_title, $formatted_date);
-        $confirmation_message_lines = [
-            'Dziękujemy za zapis na warsztaty.',
-            '',
-            'Warsztaty: ' . $workshop_title,
-            'Data: ' . $formatted_date,
-            'Imię: ' . $name,
-            'Telefon: ' . $phone,
-            '',
-            'To jest automatyczne potwierdzenie zgłoszenia.',
-        ];
-        $confirmation_message = implode("\n", $confirmation_message_lines);
+        $confirmation_subject = self::apply_template_placeholders((string)$settings['client_subject'], $template_vars);
+        $confirmation_message = self::apply_template_placeholders((string)$settings['client_message'], $template_vars);
 
         $user_sent = wp_mail($email, $confirmation_subject, $confirmation_message, $headers);
 
