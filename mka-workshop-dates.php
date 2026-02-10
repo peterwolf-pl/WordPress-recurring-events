@@ -20,6 +20,7 @@ final class MKA_Workshop_Dates_OptionC {
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_admin_assets']);
         add_action('save_post', [__CLASS__, 'save_post'], 20, 2);
         add_action('wp_ajax_mka_wd_advance_next_date', [__CLASS__, 'ajax_advance_next_date']);
+        add_action('wp_ajax_nopriv_mka_wd_advance_next_date', [__CLASS__, 'ajax_advance_next_date']);
         add_shortcode('next-button-pw', [__CLASS__, 'render_next_button_shortcode']);
     }
 
@@ -347,10 +348,6 @@ final class MKA_Workshop_Dates_OptionC {
         $nonce = isset($_POST['nonce']) ? sanitize_text_field((string)$_POST['nonce']) : '';
         if (!wp_verify_nonce($nonce, 'mka_wd_advance_next_date_' . $post_id)) {
             wp_send_json_error(['message' => 'invalid_nonce'], 403);
-        }
-
-        if (!current_user_can('edit_post', $post_id)) {
-            wp_send_json_error(['message' => 'forbidden'], 403);
         }
 
         $next_event = self::get_next_event_after_current($post_id);
