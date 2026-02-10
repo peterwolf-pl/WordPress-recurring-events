@@ -1,0 +1,21 @@
+.mka-wd-row{
+  display:flex;
+  gap:12px;
+  align-items:flex-end;
+  padding:10px 0;
+  border-bottom:1px solid #eee;
+}
+.mka-wd-col{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.mka-wd-col input{
+  min-width:180px;
+}
+.mka-wd-actions{
+  padding-bottom:2px;
+}
+.mka-wd-toolbar{
+  padding-top:12px;
+}
