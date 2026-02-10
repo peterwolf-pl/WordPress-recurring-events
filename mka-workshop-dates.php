@@ -293,7 +293,7 @@ final class MKA_Workshop_Dates_OptionC {
             }
         }
 
-        return count($upcoming) > 1 ? $upcoming[1] : $upcoming[0];
+        return $upcoming[0];
     }
 
     public static function render_next_button_shortcode(array $atts = []): string {
