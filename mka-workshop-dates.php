@@ -14,6 +14,7 @@ final class MKA_Workshop_Dates_OptionC {
     const META_NEXT_DATE       = '_workshop_next_date';
     const META_NEXT_START_TIME = '_workshop_next_start_time';
     const META_NEXT_END_TIME   = '_workshop_next_end_time';
+    const META_ROTATION_INDEX  = '_workshop_next_rotation_index';
 
 
     public static function init(): void {
@@ -255,7 +256,7 @@ final class MKA_Workshop_Dates_OptionC {
         return '00:00';
     }
 
-    private static function apply_next_event_to_post(int $post_id, array $event): void {
+    private static function apply_next_event_to_post(int $post_id, array $event, ?int $rotation_index = null): void {
         $next_date = (string)($event['date'] ?? '');
         $next_start = (string)($event['start'] ?? '');
         $next_end = (string)($event['end'] ?? '');
@@ -263,6 +264,10 @@ final class MKA_Workshop_Dates_OptionC {
         update_post_meta($post_id, self::META_NEXT_DATE, $next_date);
         update_post_meta($post_id, self::META_NEXT_START_TIME, $next_start);
         update_post_meta($post_id, self::META_NEXT_END_TIME, $next_end);
+
+        if ($rotation_index !== null) {
+            update_post_meta($post_id, self::META_ROTATION_INDEX, (string)$rotation_index);
+        }
 
         $acf_names = self::acf_field_names();
         self::update_acf_or_meta($post_id, $acf_names['date'], $next_date);
@@ -279,6 +284,20 @@ final class MKA_Workshop_Dates_OptionC {
             return null;
         }
 
+        $count = count($upcoming);
+        $stored_index_raw = get_post_meta($post_id, self::META_ROTATION_INDEX, true);
+        $stored_index = is_numeric($stored_index_raw) ? (int)$stored_index_raw : null;
+
+        if ($stored_index !== null && $stored_index >= 0 && $stored_index < $count) {
+            $next_index = $stored_index + 1;
+            if ($next_index >= $count) {
+                $next_index = 0;
+            }
+            $event = $upcoming[$next_index];
+            $event['rotation_index'] = $next_index;
+            return $event;
+        }
+
         $current_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
         $current_start = self::normalize_time_for_compare((string)get_post_meta($post_id, self::META_NEXT_START_TIME, true));
 
@@ -288,14 +307,18 @@ final class MKA_Workshop_Dates_OptionC {
 
             if ($event_date === $current_date && $event_start === $current_start) {
                 $next_index = $index + 1;
-                if ($next_index >= count($upcoming)) {
+                if ($next_index >= $count) {
                     $next_index = 0;
                 }
-                return $upcoming[$next_index];
+                $next_event = $upcoming[$next_index];
+                $next_event['rotation_index'] = $next_index;
+                return $next_event;
             }
         }
 
-        return $upcoming[0];
+        $event = $upcoming[0];
+        $event['rotation_index'] = 0;
+        return $event;
     }
 
     public static function render_next_button_shortcode(array $atts = []): string {
@@ -346,7 +369,8 @@ final class MKA_Workshop_Dates_OptionC {
 
         $next_event = self::get_next_event_after_current($post_id);
         if ($next_event) {
-            self::apply_next_event_to_post($post_id, $next_event);
+            $rotation_index = isset($next_event['rotation_index']) ? (int)$next_event['rotation_index'] : null;
+            self::apply_next_event_to_post($post_id, $next_event, $rotation_index);
         }
 
         $redirect = wp_get_referer();
@@ -378,7 +402,8 @@ final class MKA_Workshop_Dates_OptionC {
             wp_send_json_error(['message' => 'no_upcoming_events'], 404);
         }
 
-        self::apply_next_event_to_post($post_id, $next_event);
+        $rotation_index = isset($next_event['rotation_index']) ? (int)$next_event['rotation_index'] : null;
+        self::apply_next_event_to_post($post_id, $next_event, $rotation_index);
 
         wp_send_json_success([
             'date' => (string)($next_event['date'] ?? ''),
@@ -423,7 +448,7 @@ final class MKA_Workshop_Dates_OptionC {
 
         $next = self::compute_next_event($clean);
         if ($next) {
-            self::apply_next_event_to_post($post_id, $next);
+            self::apply_next_event_to_post($post_id, $next, 0);
         } else {
             update_post_meta($post_id, self::META_NEXT_DATE, '');
             update_post_meta($post_id, self::META_NEXT_START_TIME, '');
@@ -433,6 +458,7 @@ final class MKA_Workshop_Dates_OptionC {
             self::update_acf_or_meta($post_id, $acf_names['date'], '');
             self::update_acf_or_meta($post_id, $acf_names['start'], '');
             self::update_acf_or_meta($post_id, $acf_names['end'], '');
+            delete_post_meta($post_id, self::META_ROTATION_INDEX);
         }
     }
 }
