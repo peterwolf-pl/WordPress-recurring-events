@@ -19,6 +19,7 @@ final class MKA_Workshop_Dates_OptionC {
         add_action('add_meta_boxes', [__CLASS__, 'add_metabox']);
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_admin_assets']);
         add_action('save_post', [__CLASS__, 'save_post'], 20, 2);
+        add_action('wp_ajax_mka_wd_advance_next_date', [__CLASS__, 'ajax_advance_next_date']);
         add_shortcode('next-button-pw', [__CLASS__, 'render_next_button_shortcode']);
     }
 
@@ -186,7 +187,7 @@ final class MKA_Workshop_Dates_OptionC {
         update_post_meta($post_id, $field_name, $value);
     }
 
-    private static function get_upcoming_dates_for_post(int $post_id): array {
+    private static function get_upcoming_events_for_post(int $post_id): array {
         $rows = self::get_dates($post_id);
         if (!$rows) {
             return [];
@@ -207,6 +208,11 @@ final class MKA_Workshop_Dates_OptionC {
                 $start = '00:00';
             }
 
+            $end = (string)($row['end'] ?? '');
+            if ($end !== '' && !preg_match('/^\d{2}:\d{2}$/', $end)) {
+                $end = '';
+            }
+
             try {
                 $dt = new DateTimeImmutable($date . ' ' . $start . ':00', $tz);
             } catch (Exception $e) {
@@ -217,6 +223,8 @@ final class MKA_Workshop_Dates_OptionC {
                 $upcoming[] = [
                     'datetime' => $dt,
                     'date' => $date,
+                    'start' => $start,
+                    'end' => $end,
                 ];
             }
         }
@@ -227,10 +235,54 @@ final class MKA_Workshop_Dates_OptionC {
 
         usort($upcoming, fn($a, $b) => $a['datetime'] <=> $b['datetime']);
 
-        return array_values(array_map(
-            fn($item) => (string)($item['date'] ?? ''),
-            $upcoming
-        ));
+        return array_values($upcoming);
+    }
+
+    private static function apply_next_event_to_post(int $post_id, array $event): void {
+        $next_date = (string)($event['date'] ?? '');
+        $next_start = (string)($event['start'] ?? '');
+        $next_end = (string)($event['end'] ?? '');
+
+        update_post_meta($post_id, self::META_NEXT_DATE, $next_date);
+        update_post_meta($post_id, self::META_NEXT_START_TIME, $next_start);
+        update_post_meta($post_id, self::META_NEXT_END_TIME, $next_end);
+
+        $acf_names = self::acf_field_names();
+        self::update_acf_or_meta($post_id, $acf_names['date'], $next_date);
+        self::update_acf_or_meta($post_id, $acf_names['start'], $next_start);
+        self::update_acf_or_meta($post_id, $acf_names['end'], $next_end);
+
+        delete_post_meta($post_id, '_workshop_next_datetime');
+        delete_post_meta($post_id, 'workshop_next_datetime');
+    }
+
+    private static function get_next_event_after_current(int $post_id): ?array {
+        $upcoming = self::get_upcoming_events_for_post($post_id);
+        if (!$upcoming) {
+            return null;
+        }
+
+        $current_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+        $current_start = (string)get_post_meta($post_id, self::META_NEXT_START_TIME, true);
+        $current_end = (string)get_post_meta($post_id, self::META_NEXT_END_TIME, true);
+
+        foreach ($upcoming as $index => $event) {
+            $matches = (
+                (string)($event['date'] ?? '') === $current_date &&
+                (string)($event['start'] ?? '') === $current_start &&
+                (string)($event['end'] ?? '') === $current_end
+            );
+
+            if ($matches) {
+                $next_index = $index + 1;
+                if ($next_index >= count($upcoming)) {
+                    $next_index = 0;
+                }
+                return $upcoming[$next_index];
+            }
+        }
+
+        return $upcoming[0];
     }
 
     public static function render_next_button_shortcode(array $atts = []): string {
@@ -247,40 +299,72 @@ final class MKA_Workshop_Dates_OptionC {
             return '';
         }
 
-        $dates = self::get_upcoming_dates_for_post($post_id);
-        if (!$dates) {
+        if (!self::get_upcoming_events_for_post($post_id)) {
             return '';
         }
 
         $uid = wp_unique_id('mka-next-date-');
-        $dates_json = wp_json_encode($dates, JSON_UNESCAPED_UNICODE);
-        if (!is_string($dates_json) || $dates_json === '') {
-            return '';
-        }
-
         $button_label = esc_html((string)$atts['label']);
+        $ajax_url = admin_url('admin-ajax.php');
+        $nonce = wp_create_nonce('mka_wd_advance_next_date_' . $post_id);
+
         $output  = '<div class="mka-next-button-wrap" id="' . esc_attr($uid) . '">';
         $output .= '  <button type="button" class="mka-next-button">' . $button_label . '</button>';
-        $output .= '  <span class="mka-next-button-date" aria-live="polite"></span>';
         $output .= '</div>';
         $output .= '<script>';
         $output .= '(function(){';
         $output .= 'var root=document.getElementById(' . wp_json_encode($uid) . ');';
         $output .= 'if(!root){return;}';
         $output .= 'var button=root.querySelector(".mka-next-button");';
-        $output .= 'var output=root.querySelector(".mka-next-button-date");';
-        $output .= 'var dates=' . $dates_json . ';';
-        $output .= 'if(!button||!output||!Array.isArray(dates)||dates.length===0){return;}';
-        $output .= 'var index=0;';
+        $output .= 'if(!button){return;}';
+        $output .= 'var ajaxUrl=' . wp_json_encode($ajax_url) . ';';
+        $output .= 'var postId=' . (int)$post_id . ';';
+        $output .= 'var nonce=' . wp_json_encode($nonce) . ';';
         $output .= 'button.addEventListener("click",function(){';
-        $output .= 'if(index>=dates.length){index=0;}';
-        $output .= 'output.textContent=dates[index]||"";';
-        $output .= 'index++;';
+        $output .= 'button.disabled=true;';
+        $output .= 'var formData=new FormData();';
+        $output .= 'formData.append("action","mka_wd_advance_next_date");';
+        $output .= 'formData.append("post_id",String(postId));';
+        $output .= 'formData.append("nonce",nonce);';
+        $output .= 'fetch(ajaxUrl,{method:"POST",credentials:"same-origin",body:formData})';
+        $output .= '.then(function(response){return response.json();})';
+        $output .= '.then(function(data){if(!data||!data.success){throw new Error("request_failed");}})';
+        $output .= '.catch(function(){} )';
+        $output .= '.finally(function(){button.disabled=false;});';
         $output .= '});';
         $output .= '})();';
         $output .= '</script>';
 
         return $output;
+    }
+
+    public static function ajax_advance_next_date(): void {
+        $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+        if ($post_id <= 0) {
+            wp_send_json_error(['message' => 'invalid_post_id'], 400);
+        }
+
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field((string)$_POST['nonce']) : '';
+        if (!wp_verify_nonce($nonce, 'mka_wd_advance_next_date_' . $post_id)) {
+            wp_send_json_error(['message' => 'invalid_nonce'], 403);
+        }
+
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error(['message' => 'forbidden'], 403);
+        }
+
+        $next_event = self::get_next_event_after_current($post_id);
+        if (!$next_event) {
+            wp_send_json_error(['message' => 'no_upcoming_events'], 404);
+        }
+
+        self::apply_next_event_to_post($post_id, $next_event);
+
+        wp_send_json_success([
+            'date' => (string)($next_event['date'] ?? ''),
+            'start' => (string)($next_event['start'] ?? ''),
+            'end' => (string)($next_event['end'] ?? ''),
+        ]);
     }
 
     public static function save_post(int $post_id, WP_Post $post): void {
@@ -319,22 +403,7 @@ final class MKA_Workshop_Dates_OptionC {
 
         $next = self::compute_next_event($clean);
         if ($next) {
-            $next_date = (string)($next['date'] ?? '');
-            $next_start = (string)($next['start'] ?? '');
-            $next_end = (string)($next['end'] ?? '');
-
-            update_post_meta($post_id, self::META_NEXT_DATE, $next_date);
-            update_post_meta($post_id, self::META_NEXT_START_TIME, $next_start);
-            update_post_meta($post_id, self::META_NEXT_END_TIME, $next_end);
-
-            $acf_names = self::acf_field_names();
-            self::update_acf_or_meta($post_id, $acf_names['date'], $next_date);
-            self::update_acf_or_meta($post_id, $acf_names['start'], $next_start);
-            self::update_acf_or_meta($post_id, $acf_names['end'], $next_end);
-
-            // Wyczyść stare pole, żeby uniknąć korzystania z nieaktualnych danych.
-            delete_post_meta($post_id, '_workshop_next_datetime');
-            delete_post_meta($post_id, 'workshop_next_datetime');
+            self::apply_next_event_to_post($post_id, $next);
         } else {
             update_post_meta($post_id, self::META_NEXT_DATE, '');
             update_post_meta($post_id, self::META_NEXT_START_TIME, '');
