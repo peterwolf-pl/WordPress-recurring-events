@@ -247,10 +247,12 @@ final class MKA_Workshop_Dates_OptionC {
         if ($time === '') {
             return '00:00';
         }
-        if (!preg_match('/^\d{2}:\d{2}$/', $time)) {
-            return '00:00';
+
+        if (preg_match('/^(\d{2}:\d{2})(?::\d{2})?$/', $time, $matches)) {
+            return $matches[1];
         }
-        return $time;
+
+        return '00:00';
     }
 
     private static function apply_next_event_to_post(int $post_id, array $event): void {
