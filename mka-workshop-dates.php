@@ -19,6 +19,7 @@ final class MKA_Workshop_Dates_OptionC {
         add_action('add_meta_boxes', [__CLASS__, 'add_metabox']);
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_admin_assets']);
         add_action('save_post', [__CLASS__, 'save_post'], 20, 2);
+        add_shortcode('next-button-pw', [__CLASS__, 'render_next_button_shortcode']);
     }
 
     private static function post_types(): array {
@@ -183,6 +184,103 @@ final class MKA_Workshop_Dates_OptionC {
             return;
         }
         update_post_meta($post_id, $field_name, $value);
+    }
+
+    private static function get_upcoming_dates_for_post(int $post_id): array {
+        $rows = self::get_dates($post_id);
+        if (!$rows) {
+            return [];
+        }
+
+        $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('Europe/Warsaw');
+        $now = new DateTimeImmutable('now', $tz);
+        $upcoming = [];
+
+        foreach ($rows as $row) {
+            $date = (string)($row['date'] ?? '');
+            if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                continue;
+            }
+
+            $start = (string)($row['start'] ?? '00:00');
+            if ($start !== '' && !preg_match('/^\d{2}:\d{2}$/', $start)) {
+                $start = '00:00';
+            }
+
+            try {
+                $dt = new DateTimeImmutable($date . ' ' . $start . ':00', $tz);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            if ($dt >= $now) {
+                $upcoming[] = [
+                    'datetime' => $dt,
+                    'date' => $date,
+                ];
+            }
+        }
+
+        if (!$upcoming) {
+            return [];
+        }
+
+        usort($upcoming, fn($a, $b) => $a['datetime'] <=> $b['datetime']);
+
+        return array_values(array_map(
+            fn($item) => (string)($item['date'] ?? ''),
+            $upcoming
+        ));
+    }
+
+    public static function render_next_button_shortcode(array $atts = []): string {
+        $atts = shortcode_atts([
+            'post_id' => 0,
+            'label' => 'następny termin',
+        ], $atts, 'next-button-pw');
+
+        $post_id = absint($atts['post_id']);
+        if ($post_id <= 0) {
+            $post_id = get_the_ID() ?: 0;
+        }
+        if ($post_id <= 0) {
+            return '';
+        }
+
+        $dates = self::get_upcoming_dates_for_post($post_id);
+        if (!$dates) {
+            return '';
+        }
+
+        $uid = wp_unique_id('mka-next-date-');
+        $dates_json = wp_json_encode($dates, JSON_UNESCAPED_UNICODE);
+        if (!is_string($dates_json) || $dates_json === '') {
+            return '';
+        }
+
+        $button_label = esc_html((string)$atts['label']);
+        $output  = '<div class="mka-next-button-wrap" id="' . esc_attr($uid) . '">';
+        $output .= '  <button type="button" class="mka-next-button">' . $button_label . '</button>';
+        $output .= '  <span class="mka-next-button-date" aria-live="polite"></span>';
+        $output .= '</div>';
+        $output .= '<script>';
+        $output .= '(function(){';
+        $output .= 'var root=document.getElementById(' . wp_json_encode($uid) . ');';
+        $output .= 'if(!root){return;}';
+        $output .= 'var button=root.querySelector(".mka-next-button");';
+        $output .= 'var output=root.querySelector(".mka-next-button-date");';
+        $output .= 'var dates=' . $dates_json . ';';
+        $output .= 'if(!button||!output||!Array.isArray(dates)||dates.length===0){return;}';
+        $output .= 'var index=0;';
+        $output .= 'button.addEventListener("click",function(){';
+        $output .= 'if(index>=dates.length){index=0;}';
+        $output .= 'output.textContent=dates[index]||"";';
+        $output .= 'index++;';
+        $output .= '});';
+        $output .= '})();';
+        $output .= '</script>';
+
+        return $output;
     }
 
     public static function save_post(int $post_id, WP_Post $post): void {
