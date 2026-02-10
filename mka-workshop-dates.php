@@ -15,12 +15,15 @@ final class MKA_Workshop_Dates_OptionC {
     const META_NEXT_START_TIME = '_workshop_next_start_time';
     const META_NEXT_END_TIME   = '_workshop_next_end_time';
 
+    private static $next_button_script_rendered = false;
+
     public static function init(): void {
         add_action('add_meta_boxes', [__CLASS__, 'add_metabox']);
         add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_admin_assets']);
         add_action('save_post', [__CLASS__, 'save_post'], 20, 2);
         add_action('wp_ajax_mka_wd_advance_next_date', [__CLASS__, 'ajax_advance_next_date']);
         add_action('wp_ajax_nopriv_mka_wd_advance_next_date', [__CLASS__, 'ajax_advance_next_date']);
+        add_action('wp_footer', [__CLASS__, 'render_next_button_script'], 99);
         add_shortcode('next-button-pw', [__CLASS__, 'render_next_button_shortcode']);
     }
 
@@ -306,37 +309,43 @@ final class MKA_Workshop_Dates_OptionC {
 
         $uid = wp_unique_id('mka-next-date-');
         $button_label = esc_html((string)$atts['label']);
-        $ajax_url = admin_url('admin-ajax.php');
-        $nonce = wp_create_nonce('mka_wd_advance_next_date_' . $post_id);
 
         $output  = '<div class="mka-next-button-wrap" id="' . esc_attr($uid) . '">';
-        $output .= '  <button type="button" class="mka-next-button">' . $button_label . '</button>';
+        $output .= '  <button type="button" class="mka-next-button" data-post-id="' . esc_attr((string)$post_id) . '">' . $button_label . '</button>';
         $output .= '</div>';
-        $output .= '<script>';
-        $output .= '(function(){';
-        $output .= 'var root=document.getElementById(' . wp_json_encode($uid) . ');';
-        $output .= 'if(!root){return;}';
-        $output .= 'var button=root.querySelector(".mka-next-button");';
-        $output .= 'if(!button){return;}';
-        $output .= 'var ajaxUrl=' . wp_json_encode($ajax_url) . ';';
-        $output .= 'var postId=' . (int)$post_id . ';';
-        $output .= 'var nonce=' . wp_json_encode($nonce) . ';';
-        $output .= 'button.addEventListener("click",function(){';
-        $output .= 'button.disabled=true;';
-        $output .= 'var formData=new FormData();';
-        $output .= 'formData.append("action","mka_wd_advance_next_date");';
-        $output .= 'formData.append("post_id",String(postId));';
-        $output .= 'formData.append("nonce",nonce);';
-        $output .= 'fetch(ajaxUrl,{method:"POST",credentials:"same-origin",body:formData})';
-        $output .= '.then(function(response){return response.json();})';
-        $output .= '.then(function(data){if(!data||!data.success){throw new Error("request_failed");}})';
-        $output .= '.catch(function(){} )';
-        $output .= '.finally(function(){button.disabled=false;});';
-        $output .= '});';
-        $output .= '})();';
-        $output .= '</script>';
 
         return $output;
+    }
+
+    public static function render_next_button_script(): void {
+        if (self::$next_button_script_rendered) {
+            return;
+        }
+
+        self::$next_button_script_rendered = true;
+        $ajax_url = admin_url('admin-ajax.php');
+
+        echo '<script>';
+        echo '(function(){';
+        echo 'var ajaxUrl=' . wp_json_encode($ajax_url) . ';';
+        echo 'var buttons=document.querySelectorAll(".mka-next-button[data-post-id]");';
+        echo 'if(!buttons||buttons.length===0){return;}';
+        echo 'buttons.forEach(function(button){';
+        echo 'button.addEventListener("click",function(){';
+        echo 'var postId=button.getAttribute("data-post-id")||"";';
+        echo 'if(!postId){return;}';
+        echo 'button.disabled=true;';
+        echo 'var formData=new FormData();';
+        echo 'formData.append("action","mka_wd_advance_next_date");';
+        echo 'formData.append("post_id",postId);';
+        echo 'fetch(ajaxUrl,{method:"POST",credentials:"same-origin",body:formData})';
+        echo '.then(function(response){return response.json();})';
+        echo '.catch(function(){} )';
+        echo '.finally(function(){button.disabled=false;});';
+        echo '});';
+        echo '});';
+        echo '})();';
+        echo '</script>';
     }
 
     public static function ajax_advance_next_date(): void {
@@ -345,10 +354,6 @@ final class MKA_Workshop_Dates_OptionC {
             wp_send_json_error(['message' => 'invalid_post_id'], 400);
         }
 
-        $nonce = isset($_POST['nonce']) ? sanitize_text_field((string)$_POST['nonce']) : '';
-        if (!wp_verify_nonce($nonce, 'mka_wd_advance_next_date_' . $post_id)) {
-            wp_send_json_error(['message' => 'invalid_nonce'], 403);
-        }
 
         $next_event = self::get_next_event_after_current($post_id);
         if (!$next_event) {
