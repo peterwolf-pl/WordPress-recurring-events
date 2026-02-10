@@ -26,6 +26,9 @@ final class MKA_Workshop_Dates_OptionC {
         add_action('admin_post_mka_wd_advance_next_date_submit', [__CLASS__, 'handle_next_button_submit']);
         add_action('admin_post_nopriv_mka_wd_advance_next_date_submit', [__CLASS__, 'handle_next_button_submit']);
         add_shortcode('next-button-pw', [__CLASS__, 'render_next_button_shortcode']);
+        add_shortcode('rezerwa_pw', [__CLASS__, 'render_reservation_shortcode']);
+        add_action('admin_post_mka_wd_workshop_reservation', [__CLASS__, 'handle_reservation_submit']);
+        add_action('admin_post_nopriv_mka_wd_workshop_reservation', [__CLASS__, 'handle_reservation_submit']);
     }
 
     private static function post_types(): array {
@@ -354,6 +357,162 @@ final class MKA_Workshop_Dates_OptionC {
         $output .= '</div>';
 
         return $output;
+    }
+
+    private static function format_date_for_display(string $date): string {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return $date;
+        }
+
+        $ts = strtotime($date);
+        if ($ts === false) {
+            return $date;
+        }
+
+        return wp_date('d.m.Y', $ts);
+    }
+
+    public static function render_reservation_shortcode(array $atts = []): string {
+        $atts = shortcode_atts([
+            'post_id' => 0,
+            'label' => 'Zapisz się na warsztaty',
+            'title' => 'Zapisy na warsztaty',
+            'submit_label' => 'Zapisz się',
+        ], $atts, 'rezerwa_pw');
+
+        $post_id = absint($atts['post_id']);
+        if ($post_id <= 0) {
+            $post_id = get_the_ID() ?: 0;
+        }
+        if ($post_id <= 0) {
+            return '';
+        }
+
+        $workshop_title = get_the_title($post_id);
+        if (!is_string($workshop_title)) {
+            $workshop_title = '';
+        }
+
+        $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+        if ($workshop_date === '') {
+            $upcoming_events = self::get_upcoming_events_for_post($post_id);
+            if (!empty($upcoming_events[0]['date']) && is_string($upcoming_events[0]['date'])) {
+                $workshop_date = $upcoming_events[0]['date'];
+            }
+        }
+
+        $status_raw = isset($_GET['mka_reservation']) ? sanitize_text_field((string)$_GET['mka_reservation']) : '';
+        $status = in_array($status_raw, ['success', 'error', 'missing'], true) ? $status_raw : '';
+
+        $uid = wp_unique_id('mka-rezerwa-');
+        $nonce = wp_create_nonce('mka_wd_workshop_reservation_' . $post_id);
+
+        $output = '<div class="mka-reservation-wrap" id="' . esc_attr($uid) . '">';
+        if ($status === 'success') {
+            $output .= '<p class="mka-reservation-message mka-reservation-message--success">Dziękujemy, zgłoszenie zostało wysłane.</p>';
+        } elseif ($status === 'missing') {
+            $output .= '<p class="mka-reservation-message mka-reservation-message--error">Uzupełnij wymagane pola i zaakceptuj zgodę RODO.</p>';
+        } elseif ($status === 'error') {
+            $output .= '<p class="mka-reservation-message mka-reservation-message--error">Nie udało się wysłać zgłoszenia. Spróbuj ponownie.</p>';
+        }
+
+        $output .= '<details class="mka-reservation-details">';
+        $output .= '  <summary class="mka-reservation-button">' . esc_html((string)$atts['label']) . '</summary>';
+        $output .= '  <div class="mka-reservation-form-wrap">';
+        $output .= '      <h3>' . esc_html((string)$atts['title']) . '</h3>';
+        $output .= '      <form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        $output .= '          <input type="hidden" name="action" value="mka_wd_workshop_reservation" />';
+        $output .= '          <input type="hidden" name="post_id" value="' . esc_attr((string)$post_id) . '" />';
+        $output .= '          <input type="hidden" name="nonce" value="' . esc_attr($nonce) . '" />';
+        $output .= '          <input type="hidden" name="workshop_title" value="' . esc_attr($workshop_title) . '" />';
+        $output .= '          <input type="hidden" name="workshop_date" value="' . esc_attr($workshop_date) . '" />';
+        $output .= '          <p><strong>Warsztaty:</strong> ' . esc_html($workshop_title) . '</p>';
+        $output .= '          <p><strong>Termin:</strong> ' . esc_html(self::format_date_for_display($workshop_date)) . '</p>';
+        $output .= '          <p><label>Imię<br /><input type="text" name="name" required /></label></p>';
+        $output .= '          <p><label>Telefon<br /><input type="tel" name="phone" required /></label></p>';
+        $output .= '          <p><label>Mail<br /><input type="email" name="email" required /></label></p>';
+        $output .= '          <p><label><input type="checkbox" name="rodo" value="1" required /> Wyrażam zgodę na przetwarzanie danych osobowych (RODO).</label></p>';
+        $output .= '          <p><button type="submit" class="mka-reservation-submit">' . esc_html((string)$atts['submit_label']) . '</button></p>';
+        $output .= '      </form>';
+        $output .= '  </div>';
+        $output .= '</details>';
+        $output .= '</div>';
+
+        return $output;
+    }
+
+    private static function redirect_after_reservation(int $post_id, string $status): void {
+        $redirect = wp_get_referer();
+        if (!is_string($redirect) || $redirect === '') {
+            $redirect = get_permalink($post_id);
+        }
+        if (!is_string($redirect) || $redirect === '') {
+            $redirect = home_url('/');
+        }
+
+        $redirect = add_query_arg('mka_reservation', $status, $redirect);
+        wp_safe_redirect($redirect);
+        exit;
+    }
+
+    public static function handle_reservation_submit(): void {
+        $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+        if ($post_id <= 0) {
+            wp_die('Invalid post ID.', 400);
+        }
+
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field((string)$_POST['nonce']) : '';
+        if (!wp_verify_nonce($nonce, 'mka_wd_workshop_reservation_' . $post_id)) {
+            wp_die('Invalid nonce.', 403);
+        }
+
+        $name = isset($_POST['name']) ? sanitize_text_field((string)$_POST['name']) : '';
+        $phone = isset($_POST['phone']) ? sanitize_text_field((string)$_POST['phone']) : '';
+        $email = isset($_POST['email']) ? sanitize_email((string)$_POST['email']) : '';
+        $rodo = isset($_POST['rodo']) ? sanitize_text_field((string)$_POST['rodo']) : '';
+        $workshop_title = isset($_POST['workshop_title']) ? sanitize_text_field((string)$_POST['workshop_title']) : '';
+        $workshop_date = isset($_POST['workshop_date']) ? sanitize_text_field((string)$_POST['workshop_date']) : '';
+
+        if ($name === '' || $phone === '' || $email === '' || !is_email($email) || $rodo !== '1') {
+            self::redirect_after_reservation($post_id, 'missing');
+        }
+
+        if ($workshop_title === '') {
+            $title = get_the_title($post_id);
+            $workshop_title = is_string($title) ? $title : '';
+        }
+
+        if ($workshop_date === '') {
+            $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+        }
+
+        $formatted_date = self::format_date_for_display($workshop_date);
+        $subject = sprintf('Nowy zapis na warsztaty: %s (%s)', $workshop_title, $formatted_date);
+        $message_lines = [
+            'Nowe zgłoszenie na warsztaty:',
+            '',
+            'Warsztaty: ' . $workshop_title,
+            'Data: ' . $formatted_date,
+            'Imię: ' . $name,
+            'Telefon: ' . $phone,
+            'E-mail: ' . $email,
+            'Zgoda RODO: tak',
+        ];
+        $message = implode("\n", $message_lines);
+
+        $headers = [
+            'Content-Type: text/plain; charset=UTF-8',
+            'Reply-To: ' . $name . ' <' . $email . '>',
+        ];
+
+        $recipients = [
+            $email,
+            'warsztaty@mkalodz.pl',
+            'p.wilkocki@mkalodz.pl',
+        ];
+
+        $sent = wp_mail($recipients, $subject, $message, $headers);
+        self::redirect_after_reservation($post_id, $sent ? 'success' : 'error');
     }
 
     public static function handle_next_button_submit(): void {
