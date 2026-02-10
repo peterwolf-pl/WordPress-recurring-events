@@ -1,9 +1,9 @@
 <?php
 /*
-Plugin Name: MKA Workshop Dates (Option C)
-Description: Metabox z wieloma terminami (repeater bez ACF PRO). Zapis do _workshop_dates (JSON) + auto aktualizacja najblizszego terminu.
-Version: 1.0.0
-Author: MKA
+Plugin Name: WordPress recurring events for Book Art Museum
+Description: Metabox z wieloma terminami . Zapis do _workshop_next_date, _workshop_next_start_time, _workshop_next_end_time (JSON) + auto aktualizacja najblizszego terminu.
+Version: 1.1.31
+Author: Piotrek Wilkocki  <a href="https://peterwolf.pl">peterwolf.pl</a>
 License: GPLv2 or later
 */
 
@@ -217,6 +217,7 @@ final class MKA_Workshop_Dates_OptionC {
 
         echo '<div class="wrap">';
         echo '<h1>MKA Workshop Dates - ustawienia</h1>';
+        echo '<h3>wordpress plugin by peterwolf.pl</h3>';
         echo '<p>Dostępne placeholdery: <code>{workshop_title}</code>, <code>{workshop_date}</code>, <code>{name}</code>, <code>{phone}</code>, <code>{email}</code>.</p>';
         echo '<form method="post" action="options.php">';
         settings_fields('mka_wd_settings_group');
@@ -650,10 +651,10 @@ final class MKA_Workshop_Dates_OptionC {
         $output .= '          <input type="hidden" name="workshop_date" value="' . esc_attr($workshop_date) . '" />';
         $output .= '          <p><strong>Warsztaty:</strong> ' . esc_html($workshop_title) . '</p>';
         $output .= '          <p><strong>Termin:</strong> ' . esc_html(self::format_date_for_display($workshop_date)) . '</p>';
-        $output .= '          <p><label>Imię<br /><input type="text" name="name" required /></label></p>';
-        $output .= '          <p><label>Telefon<br /><input type="tel" name="phone" required /></label></p>';
-        $output .= '          <p><label>Mail<br /><input type="email" name="email" required /></label></p>';
-        $output .= '          <p><label><input type="checkbox" name="rodo" value="1" required /> Wyrażam zgodę na przetwarzanie danych osobowych (RODO).</label></p>';
+        $output .= '          <p><label>Imię:<br /><input type="text" name="name" required /></label></p>';
+        $output .= '          <p><label>Telefon:<br /><input type="tel" name="phone" required /></label></p>';
+        $output .= '          <p><label>Mail:<br /><input type="email" name="email" required /></label></p>';
+        $output .= '          <p><label><input type="checkbox" name="rodo" value="1" required /> Wyrażam zgodę na przetwarzanie danych osobowych (<a href="https://mkalodz.pl/polityka-prywatnosci/">RODO</a>).</label></p>';
         $output .= '          <p><button type="submit" class="mka-reservation-submit" style="' . esc_attr($button_style) . '">' . esc_html((string)$atts['submit_label']) . '</button></p>';
         $output .= '      </form>';
         $output .= '  </div>';
