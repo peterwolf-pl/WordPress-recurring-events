@@ -242,6 +242,17 @@ final class MKA_Workshop_Dates_OptionC {
         return array_values($upcoming);
     }
 
+    private static function normalize_time_for_compare(string $time): string {
+        $time = trim($time);
+        if ($time === '') {
+            return '00:00';
+        }
+        if (!preg_match('/^\d{2}:\d{2}$/', $time)) {
+            return '00:00';
+        }
+        return $time;
+    }
+
     private static function apply_next_event_to_post(int $post_id, array $event): void {
         $next_date = (string)($event['date'] ?? '');
         $next_start = (string)($event['start'] ?? '');
@@ -267,17 +278,13 @@ final class MKA_Workshop_Dates_OptionC {
         }
 
         $current_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
-        $current_start = (string)get_post_meta($post_id, self::META_NEXT_START_TIME, true);
-        $current_end = (string)get_post_meta($post_id, self::META_NEXT_END_TIME, true);
+        $current_start = self::normalize_time_for_compare((string)get_post_meta($post_id, self::META_NEXT_START_TIME, true));
 
         foreach ($upcoming as $index => $event) {
-            $matches = (
-                (string)($event['date'] ?? '') === $current_date &&
-                (string)($event['start'] ?? '') === $current_start &&
-                (string)($event['end'] ?? '') === $current_end
-            );
+            $event_date = (string)($event['date'] ?? '');
+            $event_start = self::normalize_time_for_compare((string)($event['start'] ?? ''));
 
-            if ($matches) {
+            if ($event_date === $current_date && $event_start === $current_start) {
                 $next_index = $index + 1;
                 if ($next_index >= count($upcoming)) {
                     $next_index = 0;
@@ -286,7 +293,7 @@ final class MKA_Workshop_Dates_OptionC {
             }
         }
 
-        return $upcoming[0];
+        return count($upcoming) > 1 ? $upcoming[1] : $upcoming[0];
     }
 
     public static function render_next_button_shortcode(array $atts = []): string {
