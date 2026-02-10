@@ -393,7 +393,10 @@ final class MKA_Workshop_Dates_OptionC {
             $workshop_title = '';
         }
 
-        $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+        $workshop_date = (string)get_post_meta($post_id, 'workshop_next_date', true);
+        if ($workshop_date === '') {
+            $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+        }
         if ($workshop_date === '') {
             $upcoming_events = self::get_upcoming_events_for_post($post_id);
             if (!empty($upcoming_events[0]['date']) && is_string($upcoming_events[0]['date'])) {
@@ -483,7 +486,10 @@ final class MKA_Workshop_Dates_OptionC {
         }
 
         if ($workshop_date === '') {
-            $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+            $workshop_date = (string)get_post_meta($post_id, 'workshop_next_date', true);
+            if ($workshop_date === '') {
+                $workshop_date = (string)get_post_meta($post_id, self::META_NEXT_DATE, true);
+            }
         }
 
         $formatted_date = self::format_date_for_display($workshop_date);
